@@ -8,3 +8,25 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Audio files (keep directory but not files)
+audio/*
+!audio/.gitkeep
+
+# Transcription files (keep directory but not files)
+transcription/*
+!transcription/.gitkeep
+
+# Old transcript at root (deprecated)
+transcript.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
