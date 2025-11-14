@@ -2,6 +2,7 @@ import soundfile as sf
 import torch
 import numpy as np
 import os
+import shutil
 from pathlib import Path
 from pyannote.audio import Pipeline
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline as transformers_pipeline
@@ -14,6 +15,7 @@ print(f"Using device: {device}")
 # Define directories
 AUDIO_DIR = Path("audio")
 TRANSCRIPTION_DIR = Path("transcription")
+PROCESSED_DIR = Path("processed")
 
 # Supported audio formats
 SUPPORTED_FORMATS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg'}
@@ -223,6 +225,12 @@ def process_audio_file(audio_path):
                 f.write(f"{seg['text']}\n\n")
 
         print(f"✓ Transcription saved to {output_path}")
+
+        # Move processed audio to processed directory
+        processed_path = PROCESSED_DIR / audio_path.name
+        shutil.move(str(audio_path), str(processed_path))
+        print(f"✓ Audio moved to {processed_path}")
+
         return True
 
     except Exception as e:

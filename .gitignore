@@ -17,6 +17,10 @@ audio/*
 transcription/*
 !transcription/.gitkeep
 
+# Processed audio files (keep directory but not files)
+processed/*
+!processed/.gitkeep
+
 # Old transcript at root (deprecated)
 transcript.md
 

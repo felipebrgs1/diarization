@@ -8,6 +8,7 @@ Sistema automatizado para transcrever áudios e identificar falantes usando IA.
 - **Diarização de falantes**: Identifica e separa diferentes falantes automaticamente
 - **Detecção precisa de mudanças**: Algoritmo avançado que detecta quando falantes alternam rapidamente
 - **Processamento em lote**: Processa múltiplos arquivos de áudio automaticamente
+- **Organização automática**: Move áudios processados para pasta separada
 - **Suporte a múltiplos formatos**: WAV, MP3, FLAC, M4A, OGG
 
 ## Melhorias Implementadas
@@ -18,6 +19,13 @@ Sistema automatizado para transcrever áudios e identificar falantes usando IA.
 - **Detecção por energia**: Analisa mudanças na energia do áudio para identificar trocas de falante
 - **Segmentação sensível**: Configurado para detectar falas breves e interjeições curtas
 
+### Fluxo de Processamento
+```
+audio/arquivo.wav  →  [Processamento]  →  transcription/arquivo.md
+                                      ↘  processed/arquivo.wav
+```
+O sistema automaticamente move áudios processados para manter a pasta `audio/` organizada.
+
 ## Estrutura do Projeto
 
 ```
@@ -25,6 +33,8 @@ diarization/
 ├── audio/              # Coloque seus arquivos de áudio aqui
 │   └── .gitkeep
 ├── transcription/      # Transcrições geradas aparecem aqui
+│   └── .gitkeep
+├── processed/          # Áudios já processados são movidos para cá
 │   └── .gitkeep
 ├── main.py            # Script principal
 ├── README.md          # Esta documentação
@@ -54,6 +64,7 @@ diarization/
    uv run main.py
    ```
 3. As transcrições serão geradas na pasta `transcription/`
+4. Os áudios processados serão automaticamente movidos para `processed/`
 
 ### Formatos Suportados
 - `.wav`
@@ -64,12 +75,14 @@ diarization/
 
 ## Saída
 
-Cada arquivo de áudio gera um arquivo markdown com:
-- Nome do arquivo original
-- Duração total
-- Idioma detectado
-- Transcrição com timestamps
-- Identificação de falantes (SPEAKER_00, SPEAKER_01, etc.)
+Cada arquivo de áudio gera:
+- **Transcrição markdown** em `transcription/` com:
+  - Nome do arquivo original
+  - Duração total
+  - Idioma detectado
+  - Transcrição com timestamps
+  - Identificação de falantes (SPEAKER_00, SPEAKER_01, etc.)
+- **Áudio original** movido para `processed/` (mantém o mesmo nome)
 
 ### Exemplo de Saída
 
