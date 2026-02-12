@@ -1,12 +1,12 @@
-import soundfile as sf
-import torch
-import numpy as np
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
+
+import soundfile as sf
+import torch
 from pyannote.audio import Pipeline
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline as transformers_pipeline
-from datetime import datetime
 
 # Set device to GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -19,6 +19,9 @@ PROCESSED_DIR = Path("processed")
 
 # Supported audio formats
 SUPPORTED_FORMATS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg'}
+DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"
+DEFAULT_NUM_SPEAKERS = int(os.getenv("NUM_SPEAKERS", "2"))
+MERGE_MAX_GAP_SECONDS = 0.4
 
 def load_audio(audio_path):
     """Load audio file and convert to torch tensor."""
@@ -31,21 +34,25 @@ def load_audio(audio_path):
         waveform = waveform.T  # Transpose to (channel, time) format
     return waveform, sample_rate
 
+def load_diarization_pipeline():
+    """Load diarization pipeline with support for both token styles."""
+    print(f"Loading diarization pipeline ({DIARIZATION_MODEL_ID})...")
+    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
+
+    auth_kwargs = {"token": hf_token} if hf_token else {"use_auth_token": True}
+
+    try:
+        pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL_ID, **auth_kwargs)
+    except TypeError:
+        # Backward-compat for older auth signature.
+        pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL_ID, use_auth_token=hf_token or True)
+
+    pipeline.to(device)
+    return pipeline
+
+
 # Initialize diarization pipeline and move to GPU (load once)
-print("Loading diarization pipeline...")
-diarization_pipeline = Pipeline.from_pretrained(
-    "pyannote/speaker-diarization-3.1",
-    use_auth_token=True  # Uses the token from `huggingface-cli login`
-)
-diarization_pipeline.to(device)
-
-# Configure pipeline parameters for better speaker separation
-from pyannote.audio.pipelines.utils import PipelineModel
-
-# Adjust segmentation parameters to be more sensitive
-if hasattr(diarization_pipeline, 'segmentation'):
-    diarization_pipeline.segmentation.min_duration_on = 0.0
-    diarization_pipeline.segmentation.min_duration_off = 0.0
+diarization_pipeline = load_diarization_pipeline()
 
 # Load Whisper large-v3-turbo model for transcription (load once)
 print("Loading Whisper large-v3-turbo model...")
@@ -71,40 +78,110 @@ whisper_pipeline = transformers_pipeline(
     return_timestamps=True
 )
 
-def detect_speaker_changes_in_segment(seg, waveform, sample_rate, window_size=0.1):
-    """Detect potential speaker changes within a segment based on energy patterns."""
-    start_sample = int(seg["start"] * sample_rate)
-    end_sample = int(seg["end"] * sample_rate)
-    segment_audio = waveform[0, start_sample:end_sample].numpy()
+def get_diarization_annotation(diarization_output):
+    """Extract best available diarization annotation from pipeline output."""
+    if hasattr(diarization_output, "exclusive_speaker_diarization"):
+        return diarization_output.exclusive_speaker_diarization
+    if hasattr(diarization_output, "speaker_diarization"):
+        return diarization_output.speaker_diarization
+    return diarization_output
 
-    if len(segment_audio) == 0:
-        return []
 
-    # Calculate RMS energy in small windows
-    window_samples = int(window_size * sample_rate)
-    energies = []
-    for i in range(0, len(segment_audio), window_samples):
-        window = segment_audio[i:i + window_samples]
-        if len(window) > 0:
-            energy = np.sqrt(np.mean(window ** 2))
-            energies.append(energy)
+def build_speaker_turns(diarization_annotation):
+    """Convert diarization annotation to a sorted list of speaker turns."""
+    turns = []
+    for turn, _, speaker in diarization_annotation.itertracks(yield_label=True):
+        turns.append({
+            "start": float(turn.start),
+            "end": float(turn.end),
+            "speaker": speaker,
+        })
+    turns.sort(key=lambda x: x["start"])
+    return turns
 
-    if len(energies) < 3:
-        return []
 
-    # Find significant energy changes (potential speaker changes)
-    split_points = []
-    energies = np.array(energies)
-    for i in range(1, len(energies) - 1):
-        # Calculate relative change
-        if energies[i-1] > 0:
-            relative_change = abs(energies[i] - energies[i-1]) / energies[i-1]
-            # If energy changes by more than 40% and stays different, mark as potential split
-            if relative_change > 0.4:
-                time_offset = (i * window_samples) / sample_rate
-                split_points.append(seg["start"] + time_offset)
+def segment_overlap(start_a, end_a, start_b, end_b):
+    return max(0.0, min(end_a, end_b) - max(start_a, start_b))
 
-    return split_points
+
+def assign_speaker(chunk_start, chunk_end, speaker_turns):
+    """Assign speaker by maximum overlap; fallback to nearest turn."""
+    best_speaker = None
+    best_overlap = 0.0
+
+    for turn in speaker_turns:
+        overlap = segment_overlap(chunk_start, chunk_end, turn["start"], turn["end"])
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_speaker = turn["speaker"]
+
+    if best_speaker is not None:
+        return best_speaker
+
+    if not speaker_turns:
+        return "SPEAKER_00"
+
+    mid = (chunk_start + chunk_end) / 2
+    nearest = min(
+        speaker_turns,
+        key=lambda turn: 0.0
+        if turn["start"] <= mid <= turn["end"]
+        else min(abs(turn["start"] - mid), abs(turn["end"] - mid)),
+    )
+    return nearest["speaker"]
+
+
+def build_segments(chunks, speaker_turns):
+    """Create speaker-attributed text segments from ASR chunks."""
+    segments = []
+    for idx, chunk in enumerate(chunks):
+        chunk_text = chunk.get("text", "").strip()
+        timestamp = chunk.get("timestamp")
+
+        if not chunk_text or not timestamp or timestamp[0] is None:
+            continue
+
+        chunk_start = float(timestamp[0])
+        chunk_end = timestamp[1]
+
+        if chunk_end is None:
+            next_start = None
+            if idx + 1 < len(chunks):
+                next_ts = chunks[idx + 1].get("timestamp")
+                if next_ts:
+                    next_start = next_ts[0]
+            chunk_end = float(next_start) if next_start is not None else chunk_start + 0.5
+        else:
+            chunk_end = float(chunk_end)
+
+        if chunk_end <= chunk_start:
+            chunk_end = chunk_start + 0.01
+
+        speaker = assign_speaker(chunk_start, chunk_end, speaker_turns)
+        segments.append({
+            "start": chunk_start,
+            "end": chunk_end,
+            "speaker": speaker,
+            "text": chunk_text,
+        })
+
+    return segments
+
+
+def merge_consecutive_segments(segments, max_gap_seconds=MERGE_MAX_GAP_SECONDS):
+    """Merge adjacent segments of same speaker when time gap is short."""
+    merged = []
+    for seg in segments:
+        if (
+            merged
+            and merged[-1]["speaker"] == seg["speaker"]
+            and (seg["start"] - merged[-1]["end"]) <= max_gap_seconds
+        ):
+            merged[-1]["end"] = max(merged[-1]["end"], seg["end"])
+            merged[-1]["text"] = f"{merged[-1]['text']} {seg['text']}".strip()
+        else:
+            merged.append(seg.copy())
+    return merged
 
 def process_audio_file(audio_path):
     """Process a single audio file and return the transcript."""
@@ -116,93 +193,38 @@ def process_audio_file(audio_path):
         # Load audio
         print("Loading audio...")
         waveform, sample_rate = load_audio(audio_path)
+        duration = len(waveform[0]) / sample_rate
 
         # Run diarization
         print("Running speaker diarization...")
-        diarization = diarization_pipeline({"waveform": waveform, "sample_rate": sample_rate})
+        diarization_output = diarization_pipeline(
+            {"waveform": waveform, "sample_rate": sample_rate},
+            num_speakers=DEFAULT_NUM_SPEAKERS,
+        )
+        diarization_annotation = get_diarization_annotation(diarization_output)
+        speaker_turns = build_speaker_turns(diarization_annotation)
 
         # Transcribe full audio
         print("Transcribing audio...")
         result = whisper_pipeline(str(audio_path), generate_kwargs={"language": "portuguese"})
 
-        # Create a list of segments with speaker labels
-        segments = []
-        for turn, _, speaker in diarization.itertracks(yield_label=True):
-            # Find transcription segments that overlap with this diarization segment
-            segment_text = []
-            if "chunks" in result:
-                for chunk in result["chunks"]:
-                    seg_start = chunk["timestamp"][0]
-                    seg_end = chunk["timestamp"][1] if chunk["timestamp"][1] is not None else turn.end
+        # Build speaker-attributed segments directly from ASR chunks
+        print("Aligning transcription with diarization...")
+        chunks = result.get("chunks", [])
+        segments = build_segments(chunks, speaker_turns)
 
-                    # Calculate overlap percentage - only include if significant overlap
-                    overlap_start = max(seg_start, turn.start)
-                    overlap_end = min(seg_end, turn.end)
-                    overlap_duration = max(0, overlap_end - overlap_start)
-                    chunk_duration = seg_end - seg_start
+        if not segments and result.get("text", "").strip():
+            fallback_speaker = speaker_turns[0]["speaker"] if speaker_turns else "SPEAKER_00"
+            segments = [{
+                "start": 0.0,
+                "end": duration,
+                "speaker": fallback_speaker,
+                "text": result["text"].strip(),
+            }]
 
-                    # Only include chunk if at least 50% of it overlaps with this speaker turn
-                    if chunk_duration > 0 and (overlap_duration / chunk_duration) >= 0.5:
-                        segment_text.append(chunk["text"].strip())
-
-            if segment_text:
-                segments.append({
-                    "start": turn.start,
-                    "end": turn.end,
-                    "speaker": speaker,
-                    "text": " ".join(segment_text)
-                })
-
-        # Apply speaker change detection and refine segments
-        print("Refining speaker segments...")
-        refined_segments = []
-        for seg in segments:
-            split_points = detect_speaker_changes_in_segment(seg, waveform, sample_rate)
-
-            if not split_points:
-                refined_segments.append(seg)
-            else:
-                # Split segment at detected points
-                prev_time = seg["start"]
-                words = seg["text"].split()
-                words_per_split = max(1, len(words) // (len(split_points) + 1))
-
-                for i, split_time in enumerate(split_points):
-                    if split_time > prev_time and split_time < seg["end"]:
-                        text_portion = " ".join(words[i*words_per_split:(i+1)*words_per_split])
-                        if text_portion.strip():
-                            refined_segments.append({
-                                "start": prev_time,
-                                "end": split_time,
-                                "speaker": seg["speaker"],
-                                "text": text_portion
-                            })
-                        prev_time = split_time
-
-                # Add remaining portion
-                remaining_text = " ".join(words[len(split_points)*words_per_split:])
-                if remaining_text.strip():
-                    refined_segments.append({
-                        "start": prev_time,
-                        "end": seg["end"],
-                        "speaker": seg["speaker"],
-                        "text": remaining_text
-                    })
-
-        # Merge consecutive segments from the same speaker with stricter criteria
+        # Merge consecutive segments from the same speaker with conservative gap
         print("Merging segments...")
-        merged_segments = []
-        for seg in refined_segments:
-            if merged_segments and merged_segments[-1]["speaker"] == seg["speaker"] and \
-               (seg["start"] - merged_segments[-1]["end"]) < 0.3:  # Less than 0.3 second gap (stricter)
-                # Merge with previous segment
-                merged_segments[-1]["end"] = seg["end"]
-                merged_segments[-1]["text"] += " " + seg["text"]
-            else:
-                merged_segments.append(seg)
-
-        # Calculate duration from audio
-        duration = len(waveform[0]) / sample_rate
+        merged_segments = merge_consecutive_segments(segments)
 
         # Generate output filename
         output_filename = audio_path.stem + ".md"
@@ -242,6 +264,9 @@ if __name__ == "__main__":
     print(f"\n{'='*60}")
     print("Audio Transcription & Diarization System")
     print(f"{'='*60}\n")
+
+    TRANSCRIPTION_DIR.mkdir(parents=True, exist_ok=True)
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
     # Find all audio files in the audio directory
     audio_files = []

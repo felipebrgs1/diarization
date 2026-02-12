@@ -5,8 +5,8 @@ Sistema automatizado para transcrever áudios e identificar falantes usando IA.
 ## Funcionalidades
 
 - **Transcrição de alta qualidade**: Usa Whisper large-v3-turbo para transcrição precisa em português
-- **Diarização de falantes**: Identifica e separa diferentes falantes automaticamente
-- **Detecção precisa de mudanças**: Algoritmo avançado que detecta quando falantes alternam rapidamente
+- **Diarização de falantes**: Usa `pyannote/speaker-diarization-community-1`
+- **Alinhamento robusto**: Usa diarização exclusiva para reduzir troca incorreta de falante
 - **Processamento em lote**: Processa múltiplos arquivos de áudio automaticamente
 - **Organização automática**: Move áudios processados para pasta separada
 - **Suporte a múltiplos formatos**: WAV, MP3, FLAC, M4A, OGG
@@ -14,10 +14,10 @@ Sistema automatizado para transcrever áudios e identificar falantes usando IA.
 ## Melhorias Implementadas
 
 ### Precisão de Diarização
-- **Sobreposição inteligente**: Atribui texto a falantes apenas quando há 50%+ de sobreposição temporal
-- **Merge conservador**: Junta segmentos do mesmo falante apenas se estiverem a menos de 0.3s de distância
-- **Detecção por energia**: Analisa mudanças na energia do áudio para identificar trocas de falante
-- **Segmentação sensível**: Configurado para detectar falas breves e interjeições curtas
+- **Diarização exclusiva**: Prioriza `exclusive_speaker_diarization` quando disponível
+- **Atribuição por maior sobreposição**: Cada chunk do Whisper é associado ao falante com maior interseção temporal
+- **Fallback resiliente**: Quando não há sobreposição, usa o turno mais próximo no tempo
+- **Merge conservador**: Junta segmentos adjacentes do mesmo falante com gap curto
 
 ### Fluxo de Processamento
 ```
@@ -43,7 +43,7 @@ diarization/
 
 ## Requisitos
 
-- Python 3.8+
+- Python 3.11+
 - CUDA (opcional, mas recomendado para melhor performance)
 - Token do Hugging Face (para pyannote.audio)
 
@@ -54,6 +54,7 @@ diarization/
    ```bash
    huggingface-cli login
    ```
+   Aceite os termos de uso de `pyannote/speaker-diarization-community-1` no Hugging Face.
 3. As dependências são gerenciadas automaticamente pelo uv
 
 ## Uso
@@ -63,8 +64,35 @@ diarization/
    ```bash
    uv run main.py
    ```
+   Opcional para chamadas telefônicas:
+   ```bash
+   NUM_SPEAKERS=2 uv run main.py
+   ```
 3. As transcrições serão geradas na pasta `transcription/`
 4. Os áudios processados serão automaticamente movidos para `processed/`
+
+## Uso com Docker (sem Python local)
+
+Requisito: Docker instalado na máquina.
+
+1. Faça login no Hugging Face na máquina host **ou** passe o token via variável:
+   ```bash
+   export HF_TOKEN=seu_token_aqui
+   ```
+2. Faça o build da imagem:
+   ```bash
+   make build
+   ```
+3. Rode o processamento em container (CPU):
+   ```bash
+   make run HF_TOKEN=$HF_TOKEN NUM_SPEAKERS=2
+   ```
+4. Para usar GPU NVIDIA:
+   ```bash
+   make run-gpu HF_TOKEN=$HF_TOKEN NUM_SPEAKERS=2
+   ```
+
+Pastas `audio/`, `transcription/` e `processed/` são montadas como volume, então os arquivos continuam no host.
 
 ### Formatos Suportados
 - `.wav`
@@ -106,7 +134,7 @@ Sim, é ela.
 
 ## Tecnologias
 
-- **pyannote.audio**: Diarização de falantes (speaker-diarization-3.1)
+- **pyannote.audio**: Diarização de falantes (`speaker-diarization-community-1`)
 - **OpenAI Whisper**: Transcrição de áudio (large-v3-turbo)
 - **PyTorch**: Framework de deep learning
 - **soundfile**: Processamento de áudio
@@ -128,7 +156,7 @@ Sim, é ela.
 - Aceite os termos de uso do pyannote.audio no Hugging Face
 
 ### Diarização imprecisa
-- Os parâmetros já foram otimizados para melhor precisão
+- Para telefonia, mantenha `NUM_SPEAKERS=2` quando souber que são dois lados da ligação
 - Para áudios com muito ruído, considere pré-processamento
 - Áudios com mais de 2-3 falantes podem ter precisão reduzida
 
