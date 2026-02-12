@@ -75,21 +75,24 @@ diarization/
 
 Requisito: Docker instalado na máquina.
 
-1. Faça login no Hugging Face na máquina host **ou** passe o token via variável:
+1. Crie o arquivo de ambiente:
    ```bash
-   export HF_TOKEN=seu_token_aqui
+   cp .env.example .env
    ```
-2. Faça o build da imagem:
+2. Edite o `.env` e preencha `HF_TOKEN` com seu token real do Hugging Face.
+   Formato correto (sem aspas): `HF_TOKEN=hf_xxx`
+   Opcionalmente ajuste `DIARIZATION_MODEL_ID` no `.env`.
+3. Faça o build da imagem:
    ```bash
    make build
    ```
-3. Rode o processamento em container (CPU):
+4. Rode o processamento em container (CPU):
    ```bash
-   make run HF_TOKEN=$HF_TOKEN NUM_SPEAKERS=2
+   make run
    ```
-4. Para usar GPU NVIDIA:
+5. Para usar GPU NVIDIA:
    ```bash
-   make run-gpu HF_TOKEN=$HF_TOKEN NUM_SPEAKERS=2
+   make run-gpu
    ```
 
 Pastas `audio/`, `transcription/` e `processed/` são montadas como volume, então os arquivos continuam no host.
@@ -153,7 +156,34 @@ Sim, é ela.
 
 ### Erros de autenticação
 - Execute `huggingface-cli login` e forneça seu token
+- No fluxo Docker, confirme `HF_TOKEN` preenchido no arquivo `.env`
 - Aceite os termos de uso do pyannote.audio no Hugging Face
+
+### Erro `unexpected keyword argument 'plda'`
+- Causa: `pyannote/speaker-diarization-community-1` incompatível com `pyannote-audio==3.x`
+- Comportamento atual do projeto: fallback automático para `pyannote/speaker-diarization-3.1`
+- Para fixar manualmente no `.env`:
+  ```bash
+  DIARIZATION_MODEL_ID=pyannote/speaker-diarization-3.1
+  ```
+
+### Erro Docker GPU
+- Erro: `could not select device driver "" with capabilities: [[gpu]]`
+- Causa: runtime NVIDIA não está configurado no Docker
+- Em CachyOS/Arch:
+  ```bash
+  sudo pacman -Syu nvidia-container-toolkit
+  sudo nvidia-ctk runtime configure --runtime=docker
+  sudo systemctl restart docker
+  ```
+- Teste:
+  ```bash
+  docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+  ```
+- Se precisar rodar imediatamente sem GPU, use:
+  ```bash
+  make run
+  ```
 
 ### Diarização imprecisa
 - Para telefonia, mantenha `NUM_SPEAKERS=2` quando souber que são dois lados da ligação

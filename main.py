@@ -19,7 +19,8 @@ PROCESSED_DIR = Path("processed")
 
 # Supported audio formats
 SUPPORTED_FORMATS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg'}
-DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"
+DIARIZATION_MODEL_ID = os.getenv("DIARIZATION_MODEL_ID", "pyannote/speaker-diarization-community-1")
+FALLBACK_DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-3.1"
 DEFAULT_NUM_SPEAKERS = int(os.getenv("NUM_SPEAKERS", "2"))
 MERGE_MAX_GAP_SECONDS = 0.4
 
@@ -34,18 +35,65 @@ def load_audio(audio_path):
         waveform = waveform.T  # Transpose to (channel, time) format
     return waveform, sample_rate
 
+def _load_pipeline_from_pretrained(model_id, hf_token):
+    """Load pyannote pipeline handling auth kwarg differences across versions."""
+    auth_attempts = []
+    if hf_token:
+        auth_attempts = [
+            {"use_auth_token": hf_token},
+            {"token": hf_token},
+        ]
+    else:
+        auth_attempts = [
+            {"use_auth_token": True},
+            {},
+        ]
+
+    last_signature_error = None
+    for kwargs in auth_attempts:
+        try:
+            return Pipeline.from_pretrained(model_id, **kwargs)
+        except TypeError as exc:
+            error_text = str(exc)
+            if "unexpected keyword argument 'token'" in error_text or \
+               "unexpected keyword argument 'use_auth_token'" in error_text:
+                last_signature_error = exc
+                continue
+            raise
+
+    if last_signature_error:
+        raise last_signature_error
+
+    raise RuntimeError(f"Unable to load pipeline {model_id}")
+
+
 def load_diarization_pipeline():
-    """Load diarization pipeline with support for both token styles."""
+    """Load diarization pipeline with safe fallback for legacy pyannote versions."""
     print(f"Loading diarization pipeline ({DIARIZATION_MODEL_ID})...")
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
 
-    auth_kwargs = {"token": hf_token} if hf_token else {"use_auth_token": True}
-
     try:
-        pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL_ID, **auth_kwargs)
-    except TypeError:
-        # Backward-compat for older auth signature.
-        pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL_ID, use_auth_token=hf_token or True)
+        pipeline = _load_pipeline_from_pretrained(DIARIZATION_MODEL_ID, hf_token)
+    except TypeError as exc:
+        # community-1 can be incompatible with pyannote.audio 3.x.
+        if (
+            "unexpected keyword argument 'plda'" in str(exc)
+            and DIARIZATION_MODEL_ID != FALLBACK_DIARIZATION_MODEL_ID
+        ):
+            print(
+                f"Model '{DIARIZATION_MODEL_ID}' is incompatible with installed pyannote.audio. "
+                f"Falling back to '{FALLBACK_DIARIZATION_MODEL_ID}'."
+            )
+            pipeline = _load_pipeline_from_pretrained(FALLBACK_DIARIZATION_MODEL_ID, hf_token)
+        else:
+            raise
+
+    if pipeline is None:
+        raise RuntimeError(
+            "Failed to load diarization pipeline. "
+            "For Docker runs, pass a real Hugging Face token via HF_TOKEN and "
+            "accept the model terms at https://hf.co/pyannote/speaker-diarization-community-1"
+        )
 
     pipeline.to(device)
     return pipeline

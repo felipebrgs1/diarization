@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Environment files
+.env
+
 # Audio files (keep directory but not files)
 audio/*
 !audio/.gitkeep
