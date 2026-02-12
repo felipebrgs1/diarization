@@ -24,6 +24,26 @@ FALLBACK_DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-3.1"
 DEFAULT_NUM_SPEAKERS = int(os.getenv("NUM_SPEAKERS", "2"))
 MERGE_MAX_GAP_SECONDS = 0.4
 
+
+def configure_torch_checkpoint_loading():
+    """Compatibility mode for trusted legacy checkpoints with torch>=2.6."""
+    # pyannote legacy checkpoints may require pickle objects blocked by
+    # torch>=2.6 default (weights_only=True). We only use trusted HF models here.
+    os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+    try:
+        from torch.serialization import add_safe_globals
+        from torch.torch_version import TorchVersion
+
+        add_safe_globals([TorchVersion])
+    except Exception:
+        # Fallback via env var above is still effective when safe globals API
+        # changes across torch versions.
+        pass
+
+
+configure_torch_checkpoint_loading()
+
+
 def load_audio(audio_path):
     """Load audio file and convert to torch tensor."""
     waveform, sample_rate = sf.read(audio_path, dtype='float32')
@@ -91,7 +111,7 @@ def load_diarization_pipeline():
     if pipeline is None:
         raise RuntimeError(
             "Failed to load diarization pipeline. "
-            "For Docker runs, pass a real Hugging Face token via HF_TOKEN and "
+            "Pass a real Hugging Face token via HF_TOKEN and "
             "accept the model terms at https://hf.co/pyannote/speaker-diarization-community-1"
         )
 

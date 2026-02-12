@@ -43,59 +43,38 @@ diarization/
 
 ## Requisitos
 
-- Python 3.11+
+- `uv` instalado
+- Python 3.13 (o projeto fixa `>=3.13,<3.14`)
 - CUDA (opcional, mas recomendado para melhor performance)
 - Token do Hugging Face (para pyannote.audio)
 
 ## Instalação
 
 1. Clone o repositório
-2. Configure o token do Hugging Face:
+2. Instale as dependências com:
    ```bash
-   huggingface-cli login
+   make install
    ```
-   Aceite os termos de uso de `pyannote/speaker-diarization-community-1` no Hugging Face.
-3. As dependências são gerenciadas automaticamente pelo uv
+   Isso usa `uv sync`, cria as pastas de trabalho e gera `.env` a partir de `.env.example` (se necessário).
+3. Edite o arquivo `.env` e preencha:
+   ```bash
+   HF_TOKEN=hf_xxx
+   ```
+4. Aceite os termos de uso de `pyannote/speaker-diarization-community-1` no Hugging Face.
 
 ## Uso
 
 1. Coloque seus arquivos de áudio na pasta `audio/`
-2. Execute o script:
+2. Inicie o processamento:
    ```bash
-   uv run main.py
+   make start
    ```
    Opcional para chamadas telefônicas:
    ```bash
-   NUM_SPEAKERS=2 uv run main.py
+   NUM_SPEAKERS=2 make start
    ```
 3. As transcrições serão geradas na pasta `transcription/`
 4. Os áudios processados serão automaticamente movidos para `processed/`
-
-## Uso com Docker (sem Python local)
-
-Requisito: Docker instalado na máquina.
-
-1. Crie o arquivo de ambiente:
-   ```bash
-   cp .env.example .env
-   ```
-2. Edite o `.env` e preencha `HF_TOKEN` com seu token real do Hugging Face.
-   Formato correto (sem aspas): `HF_TOKEN=hf_xxx`
-   Opcionalmente ajuste `DIARIZATION_MODEL_ID` no `.env`.
-3. Faça o build da imagem:
-   ```bash
-   make build
-   ```
-4. Rode o processamento em container (CPU):
-   ```bash
-   make run
-   ```
-5. Para usar GPU NVIDIA:
-   ```bash
-   make run-gpu
-   ```
-
-Pastas `audio/`, `transcription/` e `processed/` são montadas como volume, então os arquivos continuam no host.
 
 ### Formatos Suportados
 - `.wav`
@@ -155,8 +134,7 @@ Sim, é ela.
 - Verifique se os arquivos têm extensões suportadas
 
 ### Erros de autenticação
-- Execute `huggingface-cli login` e forneça seu token
-- No fluxo Docker, confirme `HF_TOKEN` preenchido no arquivo `.env`
+- Confirme `HF_TOKEN` preenchido no arquivo `.env`
 - Aceite os termos de uso do pyannote.audio no Hugging Face
 
 ### Erro `unexpected keyword argument 'plda'`
@@ -167,23 +145,10 @@ Sim, é ela.
   DIARIZATION_MODEL_ID=pyannote/speaker-diarization-3.1
   ```
 
-### Erro Docker GPU
-- Erro: `could not select device driver "" with capabilities: [[gpu]]`
-- Causa: runtime NVIDIA não está configurado no Docker
-- Em CachyOS/Arch:
-  ```bash
-  sudo pacman -Syu nvidia-container-toolkit
-  sudo nvidia-ctk runtime configure --runtime=docker
-  sudo systemctl restart docker
-  ```
-- Teste:
-  ```bash
-  docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
-  ```
-- Se precisar rodar imediatamente sem GPU, use:
-  ```bash
-  make run
-  ```
+### GPU não detectada
+- Verifique se `nvidia-smi` funciona no host
+- Confirme drivers/CUDA instalados corretamente
+- O sistema roda em CPU automaticamente, mas com menor performance
 
 ### Diarização imprecisa
 - Para telefonia, mantenha `NUM_SPEAKERS=2` quando souber que são dois lados da ligação
