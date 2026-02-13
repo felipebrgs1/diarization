@@ -10,6 +10,7 @@ Sistema automatizado para transcrever áudios e identificar falantes usando IA.
 - **Processamento em lote**: Processa múltiplos arquivos de áudio automaticamente
 - **Organização automática**: Move áudios processados para pasta separada
 - **Suporte a múltiplos formatos**: WAV, MP3, FLAC, M4A, OGG
+- **Nota de atendimento com LLM**: Lê textos em `transcription/` (ou pasta configurada) e gera avaliação com `transformers` (`Qwen/Qwen3-4B-Instruct-2507`)
 
 ## Melhorias Implementadas
 
@@ -36,6 +37,8 @@ diarization/
 │   └── .gitkeep
 ├── processed/          # Áudios já processados são movidos para cá
 │   └── .gitkeep
+├── notes/              # Notas de atendimento geradas a partir de textos de entrada do rating
+├── prompt_nota_atendimento.txt # Regras de avaliação usadas no prompt
 ├── main.py            # Script principal
 ├── README.md          # Esta documentação
 └── .gitignore         # Ignora arquivos de áudio/transcrição no git
@@ -45,7 +48,7 @@ diarization/
 
 - `uv` instalado
 - Python 3.13 (o projeto fixa `>=3.13,<3.14`)
-- CUDA (opcional, mas recomendado para melhor performance)
+- GPU NVIDIA com CUDA funcional (obrigatório)
 - Token do Hugging Face (para pyannote.audio)
 
 ## Instalação
@@ -59,6 +62,11 @@ diarization/
 3. Edite o arquivo `.env` e preencha:
    ```bash
    HF_TOKEN=hf_xxx
+   NOTE_PROMPT_FILE=prompt_nota_atendimento.txt
+   RATING_INPUT_DIR=transcription
+   RATING_MODEL_ID=Qwen/Qwen3-4B-Instruct-2507
+   RATING_MAX_NEW_TOKENS=700
+   RATING_QUANTIZATION=4bit
    ```
 4. Aceite os termos de uso de `pyannote/speaker-diarization-community-1` no Hugging Face.
 
@@ -69,12 +77,25 @@ diarization/
    ```bash
    make start
    ```
+   Para gerar apenas nota de atendimento com textos já existentes em `transcription/`:
+   ```bash
+   make start:rating
+   ```
    Opcional para chamadas telefônicas:
    ```bash
    NUM_SPEAKERS=2 make start
    ```
 3. As transcrições serão geradas na pasta `transcription/`
 4. Os áudios processados serão automaticamente movidos para `processed/`
+5. Se houver arquivos `.txt` ou `.md` em `transcription/`, o sistema gera notas em `notes/` com o modelo `Qwen/Qwen3-4B-Instruct-2507`
+
+### Etapa de Nota de Atendimento (Qwen3 4B)
+
+- O pipeline lê arquivos de texto de `RATING_INPUT_DIR` (padrão: `transcription/`)
+- Aplica as regras definidas em `prompt_nota_atendimento.txt`
+- Envia o prompt para o modelo `transformers` (`RATING_MODEL_ID`, padrão `Qwen/Qwen3-4B-Instruct-2507`)
+- Quantização `4bit` por padrão (`RATING_QUANTIZATION=4bit`) para reduzir uso de VRAM
+- Salva a saída em `notes/<arquivo>.nota.md`
 
 ### Formatos Suportados
 - `.wav`
@@ -123,9 +144,9 @@ Sim, é ela.
 
 ## Performance
 
-- GPU: Recomendado para processamento rápido
-- CPU: Funciona mas é significativamente mais lento
-- Memória: ~4GB VRAM para GPU, ~8GB RAM para CPU
+- GPU: Obrigatório
+- CPU: Não suportado
+- Memória: para etapa de nota com Qwen3 4B, use `RATING_QUANTIZATION=4bit` em GPUs com VRAM limitada
 
 ## Solução de Problemas
 
@@ -148,7 +169,7 @@ Sim, é ela.
 ### GPU não detectada
 - Verifique se `nvidia-smi` funciona no host
 - Confirme drivers/CUDA instalados corretamente
-- O sistema roda em CPU automaticamente, mas com menor performance
+- O sistema falha imediatamente quando não encontra CUDA (execução em CPU é bloqueada)
 
 ### Diarização imprecisa
 - Para telefonia, mantenha `NUM_SPEAKERS=2` quando souber que são dois lados da ligação

@@ -6,23 +6,47 @@ from pathlib import Path
 import soundfile as sf
 import torch
 from pyannote.audio import Pipeline
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline as transformers_pipeline
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSpeechSeq2Seq,
+    AutoProcessor,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    pipeline as transformers_pipeline,
+)
 
-# Set device to GPU if available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
+# Mitigate CUDA memory fragmentation on long runs.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+# Enforce GPU-only execution.
+if not torch.cuda.is_available():
+    raise RuntimeError(
+        "CUDA GPU is required for this project. "
+        "No compatible CUDA device was detected."
+    )
+
+device = torch.device("cuda")
+print(f"Using device: {device} ({torch.cuda.get_device_name(0)})")
 
 # Define directories
 AUDIO_DIR = Path("audio")
 TRANSCRIPTION_DIR = Path("transcription")
 PROCESSED_DIR = Path("processed")
+NOTES_DIR = Path("notes")
+NOTE_PROMPT_FILE = Path(os.getenv("NOTE_PROMPT_FILE", "prompt_nota_atendimento.txt"))
+RATING_INPUT_DIR = Path(os.getenv("RATING_INPUT_DIR", "transcription"))
 
 # Supported audio formats
 SUPPORTED_FORMATS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg'}
+SUPPORTED_TEXT_FORMATS = {'.txt', '.md'}
 DIARIZATION_MODEL_ID = os.getenv("DIARIZATION_MODEL_ID", "pyannote/speaker-diarization-community-1")
 FALLBACK_DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-3.1"
 DEFAULT_NUM_SPEAKERS = int(os.getenv("NUM_SPEAKERS", "2"))
 MERGE_MAX_GAP_SECONDS = 0.4
+RATING_MODEL_ID = os.getenv("RATING_MODEL_ID", "Qwen/Qwen3-4B-Instruct-2507")
+RATING_MAX_NEW_TOKENS = int(os.getenv("RATING_MAX_NEW_TOKENS", "700"))
+RATING_QUANTIZATION = os.getenv("RATING_QUANTIZATION", "4bit").strip().lower()
+RUN_STAGE = os.getenv("RUN_STAGE", "audio").strip().lower()
 
 
 def configure_torch_checkpoint_loading():
@@ -119,32 +143,92 @@ def load_diarization_pipeline():
     return pipeline
 
 
-# Initialize diarization pipeline and move to GPU (load once)
-diarization_pipeline = load_diarization_pipeline()
+diarization_pipeline = None
+whisper_pipeline = None
+rating_pipeline = None
 
-# Load Whisper large-v3-turbo model for transcription (load once)
-print("Loading Whisper large-v3-turbo model...")
-model_id = "openai/whisper-large-v3-turbo"
 
-model = AutoModelForSpeechSeq2Seq.from_pretrained(
-    model_id,
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    low_cpu_mem_usage=True,
-    use_safetensors=True
-)
-model.to(device)
+def ensure_audio_models_loaded():
+    """Load diarization + ASR models once, only when audio stage is executed."""
+    global diarization_pipeline
+    global whisper_pipeline
 
-processor = AutoProcessor.from_pretrained(model_id)
+    if diarization_pipeline is None:
+        diarization_pipeline = load_diarization_pipeline()
 
-whisper_pipeline = transformers_pipeline(
-    "automatic-speech-recognition",
-    model=model,
-    tokenizer=processor.tokenizer,
-    feature_extractor=processor.feature_extractor,
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    device=device,
-    return_timestamps=True
-)
+    if whisper_pipeline is None:
+        # Load Whisper large-v3-turbo model for transcription (load once)
+        print("Loading Whisper large-v3-turbo model...")
+        model_id = "openai/whisper-large-v3-turbo"
+
+        model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True,
+            use_safetensors=True
+        )
+        model.to(device)
+
+        processor = AutoProcessor.from_pretrained(model_id)
+
+        whisper_pipeline = transformers_pipeline(
+            "automatic-speech-recognition",
+            model=model,
+            tokenizer=processor.tokenizer,
+            feature_extractor=processor.feature_extractor,
+            torch_dtype=torch.float16,
+            device=device,
+            return_timestamps=True
+        )
+
+
+def ensure_rating_model_loaded():
+    """Load local text-generation model for atendimento rating."""
+    global rating_pipeline
+
+    if rating_pipeline is not None:
+        return
+
+    if RATING_QUANTIZATION not in {"4bit", "none"}:
+        raise ValueError("RATING_QUANTIZATION must be '4bit' or 'none'.")
+
+    print(f"Loading rating model ({RATING_MODEL_ID})...")
+    print(f"Rating quantization mode: {RATING_QUANTIZATION}")
+    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
+    tokenizer = AutoTokenizer.from_pretrained(RATING_MODEL_ID, token=hf_token)
+    torch.cuda.empty_cache()
+
+    model_kwargs = {
+        "token": hf_token,
+        "low_cpu_mem_usage": True,
+    }
+    pipeline_kwargs = {}
+
+    if RATING_QUANTIZATION == "4bit":
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.float16,
+        )
+        model_kwargs["device_map"] = "auto"
+    else:
+        model_kwargs["torch_dtype"] = torch.float16
+        pipeline_kwargs["device"] = device
+
+    model = AutoModelForCausalLM.from_pretrained(
+        RATING_MODEL_ID,
+        **model_kwargs,
+    )
+    if RATING_QUANTIZATION != "4bit":
+        model.to(device)
+
+    rating_pipeline = transformers_pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        **pipeline_kwargs,
+    )
 
 def get_diarization_annotation(diarization_output):
     """Extract best available diarization annotation from pipeline output."""
@@ -251,6 +335,112 @@ def merge_consecutive_segments(segments, max_gap_seconds=MERGE_MAX_GAP_SECONDS):
             merged.append(seg.copy())
     return merged
 
+
+def load_note_prompt_template():
+    """Load note prompt rules from NOTE_PROMPT_FILE, with sensible defaults."""
+    if NOTE_PROMPT_FILE.exists():
+        return NOTE_PROMPT_FILE.read_text(encoding="utf-8").strip()
+
+    return (
+        "Você é um avaliador de qualidade de atendimento.\n"
+        "Analise a conversa e gere uma nota de 0 a 10.\n"
+        "Considere clareza, empatia, solução do problema e objetividade.\n"
+        "Responda em português com:\n"
+        "1) Nota final\n"
+        "2) Principais pontos positivos\n"
+        "3) Principais pontos de melhoria\n"
+        "4) Resumo final em 3 linhas."
+    )
+
+
+def call_rating_model(prompt):
+    """Generate atendimento rating text using local transformers model."""
+    ensure_rating_model_loaded()
+
+    outputs = rating_pipeline(
+        prompt,
+        max_new_tokens=RATING_MAX_NEW_TOKENS,
+        do_sample=False,
+        return_full_text=False,
+    )
+    if not outputs:
+        raise RuntimeError("Modelo de rating retornou saída vazia.")
+
+    generated = outputs[0].get("generated_text", "")
+    if isinstance(generated, list):
+        # Chat pipeline variants can return a message list.
+        generated = generated[-1].get("content", "") if generated else ""
+
+    generated = str(generated).strip()
+    if not generated:
+        raise RuntimeError("Modelo de rating retornou texto vazio.")
+    return generated
+
+
+def build_note_prompt(text_content, rules_prompt):
+    """Build final prompt joining rules + transcript text."""
+    return (
+        f"{rules_prompt}\n\n"
+        "### Texto do atendimento\n"
+        f"{text_content}\n\n"
+        "### Saída esperada\n"
+        "Aplique estritamente as regras e retorne somente a avaliação."
+    )
+
+
+def generate_note_from_processed_text(text_path, rules_prompt):
+    """Generate atendimento note for one processed text file."""
+    print(f"Generating atendimento note: {text_path.name}")
+    content = text_path.read_text(encoding="utf-8").strip()
+    if not content:
+        print(f"- Skipping {text_path.name}: empty content")
+        return False
+
+    prompt = build_note_prompt(content, rules_prompt)
+    note = call_rating_model(prompt)
+
+    output_path = NOTES_DIR / f"{text_path.stem}.nota.md"
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("# Nota de Atendimento\n\n")
+        f.write(f"- **Origem:** {text_path.name}\n")
+        f.write(f"- **Modelo:** {RATING_MODEL_ID}\n\n")
+        f.write(note)
+        f.write("\n")
+
+    print(f"✓ Atendimento note saved to {output_path}")
+    return True
+
+
+def process_rating_texts():
+    """Apply atendimento note prompt to text files in rating input directory."""
+    text_files = sorted(
+        [
+            file_path for file_path in RATING_INPUT_DIR.glob("*")
+            if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_TEXT_FORMATS
+        ]
+    )
+
+    if not text_files:
+        print(f"No text files found in {RATING_INPUT_DIR}/ for note generation")
+        return 0, 0
+
+    rules_prompt = load_note_prompt_template()
+    success = 0
+    failure = 0
+
+    for text_file in text_files:
+        try:
+            if generate_note_from_processed_text(text_file, rules_prompt):
+                success += 1
+            else:
+                failure += 1
+        except Exception as exc:
+            print(f"✗ Error generating note for {text_file.name}: {exc}")
+            failure += 1
+
+    return success, failure
+
+
 def process_audio_file(audio_path):
     """Process a single audio file and return the transcript."""
     print(f"\n{'='*60}")
@@ -335,18 +525,31 @@ if __name__ == "__main__":
 
     TRANSCRIPTION_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    NOTES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Find all audio files in the audio directory
-    audio_files = []
-    for ext in SUPPORTED_FORMATS:
-        audio_files.extend(AUDIO_DIR.glob(f"*{ext}"))
-
-    if not audio_files:
-        print(f"No audio files found in {AUDIO_DIR}/")
-        print(f"Supported formats: {', '.join(SUPPORTED_FORMATS)}")
+    if RUN_STAGE not in {"audio", "rating", "all"}:
+        print("Invalid RUN_STAGE. Use: audio, rating, or all.")
         exit(1)
 
-    print(f"Found {len(audio_files)} audio file(s) to process\n")
+    run_audio_stage = RUN_STAGE in {"audio", "all"}
+    run_rating_stage = RUN_STAGE in {"rating", "all"}
+
+    audio_files = []
+    if run_audio_stage:
+        ensure_audio_models_loaded()
+
+        # Find all audio files in the audio directory
+        for ext in SUPPORTED_FORMATS:
+            audio_files.extend(AUDIO_DIR.glob(f"*{ext}"))
+
+        if not audio_files:
+            print(f"No audio files found in {AUDIO_DIR}/")
+            print(f"Supported formats: {', '.join(SUPPORTED_FORMATS)}")
+            exit(1)
+
+        print(f"Found {len(audio_files)} audio file(s) to process\n")
+    else:
+        print("Transcription stage skipped (RUN_STAGE=rating).\n")
 
     # Process each audio file
     successful = 0
@@ -369,4 +572,13 @@ if __name__ == "__main__":
     print(f"Successful: {successful}")
     print(f"Failed: {failed}")
     print(f"Total time: {elapsed:.1f}s")
+    if run_rating_stage:
+        print(f"{'='*60}")
+        print(f"Atendimento Note Stage ({RATING_INPUT_DIR}/ text files)")
+        note_success, note_failed = process_rating_texts()
+        print(f"Notes generated: {note_success}")
+        print(f"Note failures: {note_failed}")
+    else:
+        print(f"{'='*60}")
+        print("Atendimento Note Stage skipped (RUN_STAGE=audio)")
     print(f"{'='*60}\n")

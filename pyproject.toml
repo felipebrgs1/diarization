@@ -14,6 +14,7 @@ dependencies = [
     "openai-whisper>=20250625",
     "transformers>=4.57.1",
     "accelerate>=1.11.0",
+    "bitsandbytes>=0.48.1",
 ]
 
 [tool.uv.sources]
