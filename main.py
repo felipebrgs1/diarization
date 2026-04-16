@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.config import (
+    BASE_DIR,
     AUDIO_DIR,
     TRANSCRIPTION_DIR,
     PROCESSED_DIR,
@@ -103,6 +104,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     TRANSCRIPTION_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     NOTES_DIR.mkdir(parents=True, exist_ok=True)

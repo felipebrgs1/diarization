@@ -6,9 +6,9 @@ help:
 	@echo "Uso:"
 	@echo "  make install          instala dependências"
 	@echo "  make login            autentica no Hugging Face"
-	@echo "  make start            transcreve áudios (sem rating)"
-	@echo "  make start:rating     transcreve áudios + gera notas"
-	@echo "  make rating           gera notas de textos em transcription/"
+	@echo "  make start            transcreve áudios em audio/audio/ (sem rating)"
+	@echo "  make start:rating     transcreve + gera notas"
+	@echo "  make rating           só notas a partir de audio/transcription/"
 
 install:
 	@$(UV) sync

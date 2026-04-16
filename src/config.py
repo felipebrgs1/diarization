@@ -12,12 +12,13 @@ print(f"Using GPU: {torch.cuda.get_device_name(0)}")
 
 TORCH_DTYPE = torch.float16
 
-AUDIO_DIR = Path("audio")
-TRANSCRIPTION_DIR = Path("transcription")
-PROCESSED_DIR = Path("processed")
-NOTES_DIR = Path("notes")
+BASE_DIR = Path("audio")
+AUDIO_DIR = BASE_DIR / "audio"
+TRANSCRIPTION_DIR = BASE_DIR / "transcription"
+PROCESSED_DIR = BASE_DIR / "processed"
+NOTES_DIR = BASE_DIR / "notes"
 NOTE_PROMPT_FILE = Path("src/prompts/atendimento_rating.md")
-RATING_INPUT_DIR = Path("transcription")
+RATING_INPUT_DIR = TRANSCRIPTION_DIR
 
 SUPPORTED_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
 SUPPORTED_TEXT_FORMATS = {".txt", ".md"}

@@ -18,21 +18,24 @@ make login      # autentica no Hugging Face (salva token localmente)
 
 ## Uso
 
-Coloque áudios em `audio/` e rode:
+Coloque áudios em `audio/audio/` e rode:
 
 ```bash
 make start           # só transcrição/diarização
 make start:rating    # transcrição + notas de atendimento
-make rating          # só notas a partir de textos em transcription/
+make rating          # só notas a partir de textos em audio/transcription/
 ```
 
 ## Estrutura
 
-- `audio/` — áudios de entrada
-- `transcription/` — transcrições geradas
-- `processed/` — áudios movidos após processamento
-- `notes/` — notas de atendimento geradas
+```
+audio/
+├── audio/           # áudios de entrada
+├── processed/       # áudios movidos após processamento
+├── transcription/   # transcrições geradas
+└── notes/           # notas de atendimento geradas
+```
 
 ## Saída
 
-Cada áudio gera um arquivo `.md` em `transcription/` com timestamps e falantes (`SPEAKER_00`, `SPEAKER_01`, ...).
+Cada áudio gera um arquivo `.md` em `audio/transcription/` com timestamps e falantes (`SPEAKER_00`, `SPEAKER_01`, ...).
