@@ -9,7 +9,6 @@ from src.config import (
     PROCESSED_DIR,
     NOTES_DIR,
     SUPPORTED_FORMATS,
-    DEFAULT_NUM_SPEAKERS,
     MERGE_MAX_GAP_SECONDS,
     RATING_INPUT_DIR,
     RATING_MODEL_ID,
@@ -47,12 +46,19 @@ def process_audio_file(audio_path: Path) -> bool:
 
         diarization = diar_pipe(
             {"waveform": waveform, "sample_rate": sample_rate},
-            num_speakers=DEFAULT_NUM_SPEAKERS,
+            min_speakers=1,
+            max_speakers=8,
         )
         speaker_turns = build_speaker_turns(get_diarization_annotation(diarization))
 
         result = whisper_pipe(
-            str(audio_path), generate_kwargs={"language": "portuguese"}
+            str(audio_path),
+            generate_kwargs={
+                "language": "pt",
+                "task": "transcribe",
+                "num_beams": 5,
+                "temperature": 0.0,
+            },
         )
         segments = build_segments(result.get("chunks", []), speaker_turns)
 

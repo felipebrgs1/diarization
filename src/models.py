@@ -27,6 +27,13 @@ def configure_torch_checkpoint_loading():
         from torch.serialization import add_safe_globals
         from torch.torch_version import TorchVersion
 
+        import warnings
+        warnings.filterwarnings(
+            "ignore",
+            message="std\\(\\): degrees of freedom is <= 0",
+            category=UserWarning,
+            module="pyannote.audio.models.blocks.pooling",
+        )
         add_safe_globals([TorchVersion])
     except Exception:
         pass

@@ -23,10 +23,9 @@ RATING_INPUT_DIR = TRANSCRIPTION_DIR
 SUPPORTED_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
 SUPPORTED_TEXT_FORMATS = {".txt", ".md"}
 
-WHISPER_MODEL_ID = "openai/whisper-large-v3-turbo"
+WHISPER_MODEL_ID = "openai/whisper-large-v3"
 DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"
 FALLBACK_DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-3.1"
-DEFAULT_NUM_SPEAKERS = 2
 MERGE_MAX_GAP_SECONDS = 0.4
 
 RATING_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
