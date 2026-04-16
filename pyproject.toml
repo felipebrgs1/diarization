@@ -15,6 +15,7 @@ dependencies = [
     "transformers>=4.57.1",
     "accelerate>=1.11.0",
     "bitsandbytes>=0.48.1",
+    "compressed-tensors>=0.15.0.1",
 ]
 
 [tool.uv.sources]
