@@ -1,37 +1,54 @@
-# Agents Overview
+# Agents Overview (Caveman Edition)
 
-System use local AI pipelines to process voice files and evaluate service quality.
+Project use local AI agents process voice. Max quality. Local VRAM optimize.
 
-## 1. Diarization Agent
-- **Source:** `src/diarization.py`
-- **Model:** Pyannote Audio.
-- **Role:** Identify speaker turns in raw audio.
+## 1. Preprocessor Agent
+- **Source:** `src/audio_processing.py`
+- **Role:** Prepare audio.
+- **Action:** Convert to 16kHz mono WAV. Clean silences. Save `preprocessed/`.
+
+## 2. Transcription & Alignment Agent (WhisperX)
+- **Source:** `src/transcription.py` + `whisperx`
+- **Model:** Whisper (Faster-Whisper) + Wav2Vec2 Alignment.
+- **Role:** Voice to text + precise timing.
 - **Action:** 
-  - Detect waveform segments.
-  - Map timestamps to Speaker IDs (SPEAKER_00, SPEAKER_01, etc.).
-  - Build speaker turn metadata for transcription alignment.
+  - Subprocess spawn (VRAM isolation).
+  - Transcribe chunks. 
+  - Word-level alignment. 
+  - Save `.whisper.json` cache.
 
-## 2. Transcription Agent
-- **Source:** `src/transcription.py`
-- **Model:** OpenAI Whisper (Local via Transformers).
-- **Role:** Convert speech to text.
-- **Action:**
-  - Process audio chunks defined by speaker turns.
-  - Generate timestamped text.
-  - Merge consecutive segments from same speaker for readability.
-  - Save output as Markdown in `transcription/`.
+## 3. Diarization Agent
+- **Source:** `src/diarization.py` + `pyannote`
+- **Model:** Pyannote Audio 4.0 (community-1).
+- **Role:** Speaker identification.
+- **Action:** 
+  - Subprocess spawn.
+  - Detect speaker turns (min 2, max 2).
+  - Assign word speakers using WhisperX metadata.
 
-## 3. Rating Agent
+## 4. Refinement Agent
+- **Source:** `src/refinement.py`
+- **Role:** Data precision.
+- **Action:** Search numbers/CPFs in segments. Fix Whisper hallucination on digits.
+
+## 5. Rating Agent (LLM)
 - **Source:** `src/rating.py`
-- **Model:** Local LLM (configurable in `src/config.py`).
-- **Role:** Quality Assurance evaluator.
-- **Action:**
-  - Load prompt template from `src/prompts/`.
-  - Analyze transcribed text for clarity, empathy, and solution efficacy.
-  - Output final score (0-10) and improvement points.
-  - Save notes in `notes/`.
+- **Model:** Configurable local LLM (DeepSeek / Llama).
+- **Role:** QA evaluator.
+- **Action:** 
+  - Load prompt `src/prompts/`.
+  - Analyze text for empathy/solution.
+  - Score 0-10. Save `notes/*.nota.md`.
 
-## Pipeline Flow
-1. Audio in `audio/`.
-2. `Diarization` + `Transcription` → `transcription/*.md`.
-3. `Rating` → `notes/*.nota.md`.
+## Pipeline Flow (Isolated Stages)
+1. **Prepare:** `audio/` → `preprocess/` (CPU).
+2. **Transcribe:** `preprocess/*.wav` → `.whisper.json` (GPU Stage 1).
+3. **Diarize:** `.whisper.json` + `wav` → `transcription/*.md` (GPU Stage 2).
+4. **Export:** `.md`, `.srt`, `.json`. Move original to `processed/`.
+5. **Rate:** (Optional) `transcription/*.md` → `notes/*.md`.
+
+## Tech Stack
+- **Diarization:** Pyannote 3.1+ / 4.0.
+- **Transcription:** WhisperX (Faster-Whisper).
+- **Refinement:** Wav2Vec2 (local).
+- **Orchestration:** Python + Multiprocessing (VRAM management).
