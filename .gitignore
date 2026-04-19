@@ -7,10 +7,11 @@ wheels/
 *.egg-info
 notes/*
 !notes/.gitkeep
-
+.agents
 # Virtual environments
 .venv
-
+skills-lock.json
+codedb.*
 # Environment files
 .env
 

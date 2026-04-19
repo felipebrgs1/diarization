@@ -16,6 +16,7 @@ BASE_DIR = Path("audio")
 AUDIO_DIR = BASE_DIR / "audio"
 TRANSCRIPTION_DIR = BASE_DIR / "transcription"
 PROCESSED_DIR = BASE_DIR / "processed"
+PREPROCESSED_DIR = BASE_DIR / "preprocessed"
 NOTES_DIR = BASE_DIR / "notes"
 NOTE_PROMPT_FILE = Path("src/prompts/atendimento_rating.md")
 RATING_INPUT_DIR = TRANSCRIPTION_DIR
@@ -23,10 +24,18 @@ RATING_INPUT_DIR = TRANSCRIPTION_DIR
 SUPPORTED_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
 SUPPORTED_TEXT_FORMATS = {".txt", ".md"}
 
-WHISPER_MODEL_ID = "openai/whisper-large-v3"
+WHISPER_MODEL_ID = "large-v3"
 DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"
 FALLBACK_DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-3.1"
-MERGE_MAX_GAP_SECONDS = 0.4
+MERGE_MAX_GAP_SECONDS = 0.25
+WHISPER_BATCH_SIZE = 4
+ALIGN_MODEL_LANGUAGE_CODE = "pt"
+
+# Speaker Mapping
+SPEAKER_MAPPING = {
+    "SPEAKER_00": "Atendente",
+    "SPEAKER_01": "Cliente"
+}
 
 RATING_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
 RATING_MAX_NEW_TOKENS = 2048

@@ -1,24 +1,22 @@
 import os
 import torch
-from pyannote.audio import Pipeline
-from transformers import (
-    AutoModelForCausalLM,
-    AutoModelForSpeechSeq2Seq,
-    AutoProcessor,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    pipeline as transformers_pipeline,
-)
+import whisperx
+from dotenv import load_dotenv
 from src.config import (
     DEVICE,
-    TORCH_DTYPE,
     WHISPER_MODEL_ID,
     DIARIZATION_MODEL_ID,
-    FALLBACK_DIARIZATION_MODEL_ID,
     RATING_MODEL_ID,
     RATING_QUANTIZATION,
+    TORCH_DTYPE,
+    ALIGN_MODEL_LANGUAGE_CODE,
 )
 
+# Load environment variables from .env
+load_dotenv()
+
+# Use token found in ~/.cache/huggingface/token or environment
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 def configure_torch_checkpoint_loading():
     """Compatibility mode for trusted legacy checkpoints with torch>=2.6."""
@@ -43,57 +41,42 @@ configure_torch_checkpoint_loading()
 
 
 def load_diarization_pipeline():
-    """Load diarization pipeline with safe fallback."""
+    """Load WhisperX DiarizationPipeline (wraps pyannote-audio)."""
+    from whisperx.diarize import DiarizationPipeline
     print(f"Loading diarization pipeline ({DIARIZATION_MODEL_ID})...")
-
-    try:
-        pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL_ID)
-    except TypeError as exc:
-        if (
-            "unexpected keyword argument 'plda'" in str(exc)
-            and DIARIZATION_MODEL_ID != FALLBACK_DIARIZATION_MODEL_ID
-        ):
-            print(
-                f"Model '{DIARIZATION_MODEL_ID}' is incompatible. Falling back to '{FALLBACK_DIARIZATION_MODEL_ID}'."
-            )
-            pipeline = Pipeline.from_pretrained(FALLBACK_DIARIZATION_MODEL_ID)
-        else:
-            raise
-
-    if pipeline is None:
-        raise RuntimeError("Failed to load diarization pipeline.")
-
-    pipeline.to(DEVICE)
-    return pipeline
-
-
-def load_whisper_pipeline():
-    """Load Whisper large-v3-turbo pipeline for transcription."""
-    print(f"Loading Whisper ({WHISPER_MODEL_ID})...")
-
-    model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        WHISPER_MODEL_ID,
-        torch_dtype=TORCH_DTYPE,
-        low_cpu_mem_usage=True,
-        use_safetensors=True,
+    return DiarizationPipeline(
+        model_name=DIARIZATION_MODEL_ID, 
+        token=HF_TOKEN, 
+        device=DEVICE.type
     )
-    model.to(DEVICE)
 
-    processor = AutoProcessor.from_pretrained(WHISPER_MODEL_ID)
 
-    return transformers_pipeline(
-        "automatic-speech-recognition",
-        model=model,
-        tokenizer=processor.tokenizer,
-        feature_extractor=processor.feature_extractor,
-        torch_dtype=TORCH_DTYPE,
-        device=DEVICE,
-        return_timestamps=True,
+def load_whisper_pipeline(language=ALIGN_MODEL_LANGUAGE_CODE):
+    """Load WhisperX model for transcription."""
+    print(f"Loading WhisperX ({WHISPER_MODEL_ID}) for language '{language}'...")
+    return whisperx.load_model(
+        WHISPER_MODEL_ID, 
+        device=DEVICE.type, 
+        compute_type="int8",
+        language=language
     )
+
+
+def load_align_model(language_code):
+    """Load WhisperX alignment model."""
+    print(f"Loading alignment model for '{language_code}'...")
+    return whisperx.load_align_model(language_code=language_code, device=DEVICE.type)
 
 
 def load_rating_pipeline():
     """Load local text-generation model for atendimento rating."""
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        BitsAndBytesConfig,
+        pipeline as transformers_pipeline,
+    )
+    
     if RATING_QUANTIZATION not in {"4bit", "none"}:
         raise ValueError("RATING_QUANTIZATION must be '4bit' or 'none'.")
 

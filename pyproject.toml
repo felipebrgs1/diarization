@@ -5,25 +5,44 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "pyannote-audio==3.4.0",
+    "pyannote-audio>=4.0.0",
     "huggingface-hub<1.0.0",
     "soundfile",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
     "torchaudio>=2.6.0",
-    "openai-whisper>=20250625",
     "transformers>=4.57.1",
     "accelerate>=1.11.0",
     "bitsandbytes>=0.48.1",
     "compressed-tensors>=0.15.0.1",
+    "jiwer>=4.0.0",
+    "ruff>=0.15.11",
+    "whisperx",
+    "python-dotenv>=1.2.2",
 ]
 
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
+
 [tool.uv.sources]
-torch = { index = "pytorch-cu124" }
-torchvision = { index = "pytorch-cu124" }
-torchaudio = { index = "pytorch-cu124" }
+torch = [
+  { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
+  { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and sys_platform != 'darwin'" },
+  { index = "pytorch", marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'" },
+]
+torchaudio = [
+  { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
+  { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and sys_platform != 'darwin'" },
+  { index = "pytorch", marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'" },
+]
+whisperx = { git = "https://github.com/m-bain/whisperX.git" }
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
 explicit = true

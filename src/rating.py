@@ -1,4 +1,3 @@
-import os
 from src.config import (
     NOTE_PROMPT_FILE, 
     NOTES_DIR, 
