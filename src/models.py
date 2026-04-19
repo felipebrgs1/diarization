@@ -44,11 +44,19 @@ def load_diarization_pipeline():
     """Load WhisperX DiarizationPipeline (wraps pyannote-audio)."""
     from whisperx.diarize import DiarizationPipeline
     print(f"Loading diarization pipeline ({DIARIZATION_MODEL_ID})...")
-    return DiarizationPipeline(
+    pipeline = DiarizationPipeline(
         model_name=DIARIZATION_MODEL_ID, 
         token=HF_TOKEN, 
         device=DEVICE.type
     )
+    
+    # Apply optimized parameters from roadmap for PT-BR telephony
+    pipeline.model.instantiate({
+        "clustering": {"method": "centroid", "min_cluster_size": 12, "threshold": 0.65},
+        "segmentation": {"min_duration_off": 0.3}
+    })
+    
+    return pipeline
 
 
 def load_whisper_pipeline(language=ALIGN_MODEL_LANGUAGE_CODE):

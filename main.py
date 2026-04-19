@@ -108,7 +108,7 @@ def diarize_and_finalize(audio_path: Path, diar_pipe) -> bool:
         duration = len(audio) / 16000 
 
         print("   [1/3] Identificando falantes (Diarização 4.0)...")
-        diarize_segments = diar_pipe(audio, min_speakers=2, max_speakers=2)
+        diarize_segments = diar_pipe(audio, num_speakers=2, min_speakers=2, max_speakers=2)
         torch.cuda.empty_cache()
 
         print("   [2/3] Atribuindo falantes...")

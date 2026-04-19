@@ -25,8 +25,8 @@ SUPPORTED_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
 SUPPORTED_TEXT_FORMATS = {".txt", ".md"}
 
 WHISPER_MODEL_ID = "large-v3"
-DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"
-FALLBACK_DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-3.1"
+DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-3.1"
+FALLBACK_DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"
 MERGE_MAX_GAP_SECONDS = 0.25
 WHISPER_BATCH_SIZE = 4
 ALIGN_MODEL_LANGUAGE_CODE = "pt"
